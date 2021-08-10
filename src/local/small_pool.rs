@@ -184,12 +184,13 @@ impl SmallPool {
         }
     }
 
-    pub(crate) fn deallocate(&mut self, ptr: *mut u8, allocator: &mut LocalAllocatorImpl) {
+    pub(crate) fn deallocate(&mut self, ptr: *mut u8, allocator: &mut LocalAllocatorImpl) -> usize {
         let obj: *mut FreeObject = ptr as _;
         self.push_free_object(obj);
         if self.free_count > self.max_free as _ {
             self.trim_free_list(allocator);
         }
+        self.object_size as _
     }
 
     fn trim_free_list(&mut self, allocator: &mut LocalAllocatorImpl) {

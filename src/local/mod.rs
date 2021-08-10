@@ -42,10 +42,10 @@ unsafe impl Allocator for LocalAllocator {
         ptr
     }
 
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, _: Layout) {
         let mut inner = self.inner.borrow_mut();
-        inner.free(ptr.as_ptr());
-        self.allocated.set(self.allocated.get() - layout.size());
+        let actual_size = inner.free(ptr.as_ptr());
+        self.allocated.set(self.allocated.get() - actual_size);
     }
 }
 
@@ -286,22 +286,24 @@ impl LocalAllocatorImpl {
         Some(span_list.pop_front(self.pages))
     }
 
-    fn free_large(&mut self, ptr: *mut u8) {
+    fn free_large(&mut self, ptr: *mut u8) -> usize {
         unsafe {
             let idx = ptr.offset_from(self.base) as u32 / PAGE_SIZE;
             let span = self.pages.at(idx as _);
-            self.free_span(idx, (*span).span_size);
+            let nr_pages = (*span).span_size;
+            self.free_span(idx, nr_pages);
+            (nr_pages * PAGE_SIZE) as _
         }
     }
 
-    fn free(&mut self, ptr: *mut u8) {
+    fn free(&mut self, ptr: *mut u8) -> usize {
         unsafe {
             let span = self.to_page(ptr);
             if !(*span).pool.is_null() {
                 let pool = (*span).pool;
                 (*pool).deallocate(ptr, self)
             } else {
-                self.free_large(ptr);
+                self.free_large(ptr)
             }
         }
     }

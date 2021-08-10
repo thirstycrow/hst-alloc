@@ -149,3 +149,38 @@ rusty_fork_test! {
             .unwrap();
     }
 }
+
+rusty_fork_test! {
+    #[test]
+    fn allocated_bytes() {
+        init_logger();
+
+        let nr_shards = 1;
+
+        ALLOCATOR.initialize(nr_shards);
+
+        LocalExecutorBuilder::new()
+            .spawn(move || async move {
+                unsafe {
+                    let shard_id = 0;
+                    ALLOCATOR.create_local_allocator(shard_id as _);
+                    assert_eq!(0, ALLOCATOR.allocated_bytes().unwrap());
+
+                    let small_layout = Layout::from_size_align(837, 1).unwrap();
+                    let small = ALLOCATOR.alloc(small_layout);
+                    assert_eq!(896, ALLOCATOR.allocated_bytes().unwrap());
+                    ALLOCATOR.dealloc(small, small_layout);
+                    assert_eq!(0, ALLOCATOR.allocated_bytes().unwrap());
+
+                    let large_layout = Layout::from_size_align(1223471, 4096).unwrap();
+                    let large = ALLOCATOR.alloc(large_layout);
+                    assert_eq!(2097152, ALLOCATOR.allocated_bytes().unwrap());
+                    ALLOCATOR.dealloc(large, large_layout);
+                    assert_eq!(0, ALLOCATOR.allocated_bytes().unwrap());
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}
