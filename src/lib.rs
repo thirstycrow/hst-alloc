@@ -8,6 +8,7 @@
 #![feature(int_log)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(slice_ptr_len)]
+#![feature(future_poll_fn)]
 #![no_std]
 
 #[cfg(test)]
@@ -16,25 +17,34 @@ extern crate std;
 
 use core::alloc::{Allocator, GlobalAlloc, Layout};
 use core::cell::{Cell, RefCell};
+use core::future::{poll_fn, Future};
 use core::intrinsics::unlikely;
 use core::ops::{Deref, DerefMut};
 use core::ptr::{null_mut, NonNull};
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::task::Waker;
 
 use libc::*;
 
 use crate::local::LocalAllocator;
 
 mod local;
+#[cfg(test)]
+mod tests;
 
 const PAGE_SIZE: u32 = 4096;
 const MEMORY_SPACE_SIZE: usize = 1 << 44;
 const LOCAL_SPACE_SIZE_IN_BITS: usize = 36;
+const MAX_SHARDS: usize = 256;
 
 #[thread_local]
 static LOCAL_ALLOCATOR: RefCell<Option<LocalAllocator>> = RefCell::new(None);
 #[thread_local]
 static LOG_ENABLED: Cell<bool> = Cell::new(false);
+
+const EMPTY_XCPU_FREE_LIST: CrossCpuFreeList = CrossCpuFreeList::default();
+
+static XCPU_FREE_LIST: [CrossCpuFreeList; MAX_SHARDS] = [EMPTY_XCPU_FREE_LIST; MAX_SHARDS];
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum MemoryLocation {
@@ -47,6 +57,29 @@ struct Params {
     base: *mut u8,
     nr_shards: u8,
     shard_memory: usize,
+}
+
+#[repr(align(64))]
+struct CrossCpuFreeList {
+    head: AtomicPtr<CrossCpuFreeItem>,
+    waker: RefCell<Option<Waker>>,
+    drainer: AtomicPtr<Option<Waker>>,
+}
+
+unsafe impl Sync for CrossCpuFreeList {}
+
+impl CrossCpuFreeList {
+    const fn default() -> Self {
+        Self {
+            waker: RefCell::new(None),
+            drainer: AtomicPtr::new(null_mut()),
+            head: AtomicPtr::new(null_mut()),
+        }
+    }
+}
+
+struct CrossCpuFreeItem {
+    next: *mut CrossCpuFreeItem,
 }
 
 pub struct HstAlloc<G> {
@@ -104,13 +137,18 @@ impl<G: GlobalAlloc> HstAlloc<G> {
         }
     }
 
-    pub fn create_local_allocator(&self, shard_id: u8) {
+    pub fn create_local_allocator(&self, shard_id: u8) -> impl Future<Output = ()> {
         assert!(LOCAL_ALLOCATOR.borrow().is_none());
         unsafe {
             match self.params.load(Ordering::Acquire).as_ref() {
                 None => panic!("HstAlloc is not initialized"),
                 Some(params) => {
-                    *LOCAL_ALLOCATOR.borrow_mut() = Some(LocalAllocator::create(shard_id, params))
+                    *LOCAL_ALLOCATOR.borrow_mut() = Some(LocalAllocator::create(shard_id, params));
+                    poll_fn(|cx| {
+                        let mut allocator = LOCAL_ALLOCATOR.borrow_mut();
+                        let allocator = allocator.as_mut().unwrap();
+                        allocator.poll_drain_cross_shard_freelist(cx)
+                    })
                 }
             }
         }
@@ -172,7 +210,7 @@ unsafe impl<G: GlobalAlloc> GlobalAlloc for HstAlloc<G> {
                 let local_allocator = local_allocator.deref_mut().as_mut().unwrap();
                 local_allocator.deallocate(NonNull::new_unchecked(ptr), layout)
             }
-            MemoryLocation::Foreign(_) => {}
+            MemoryLocation::Foreign(shard_id) => free_cross_shard(shard_id, ptr),
         }
     }
 }
@@ -244,6 +282,28 @@ fn memory_location(
             } else {
                 MemoryLocation::Foreign(mem_shard_id)
             }
+        }
+    }
+}
+
+fn free_cross_shard(shard_id: u8, ptr: *mut u8) {
+    unsafe {
+        let p = ptr as *mut CrossCpuFreeItem;
+        let CrossCpuFreeList { drainer, head, .. } = &XCPU_FREE_LIST[shard_id as usize];
+        let mut old = head.load(Ordering::Relaxed);
+        loop {
+            (*p).next = old;
+            match head.compare_exchange_weak(old, p, Ordering::Release, Ordering::Relaxed) {
+                Ok(_) => break,
+                Err(current) => old = current,
+            }
+        }
+        let drainer = drainer.swap(null_mut(), Ordering::AcqRel);
+        if !drainer.is_null() {
+            #[cfg(test)]
+            log::info!("wake drainer: {:?}", drainer);
+            let waker = (*drainer).take();
+            waker.unwrap().wake_by_ref();
         }
     }
 }

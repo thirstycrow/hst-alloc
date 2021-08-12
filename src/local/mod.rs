@@ -4,13 +4,18 @@ use core::cell::{Cell, RefCell};
 use core::intrinsics::{ceilf64, log2f64, transmute, unlikely};
 use core::mem::{size_of, MaybeUninit};
 use core::ptr::{null_mut, NonNull};
+use core::sync::atomic::Ordering;
+use core::task::{Context, Poll};
 
 use libc::*;
 
 use page::{Page, PageList, Pages};
 
 use crate::local::small_pool::{idx_to_size, size_to_idx, FreeObject, SmallPool};
-use crate::{align_down, align_up, MemoryLocation, Params, LOCAL_SPACE_SIZE_IN_BITS, PAGE_SIZE};
+use crate::{
+    align_down, align_up, CrossCpuFreeList, MemoryLocation, Params, LOCAL_SPACE_SIZE_IN_BITS,
+    PAGE_SIZE, XCPU_FREE_LIST,
+};
 
 mod page;
 mod small_pool;
@@ -43,9 +48,7 @@ unsafe impl Allocator for LocalAllocator {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, _: Layout) {
-        let mut inner = self.inner.borrow_mut();
-        let actual_size = inner.free(ptr.as_ptr());
-        self.allocated.set(self.allocated.get() - actual_size);
+        self.free(ptr.as_ptr());
     }
 }
 
@@ -87,6 +90,42 @@ impl LocalAllocator {
 
     pub(crate) fn allocated_bytes(&self) -> usize {
         self.allocated.get()
+    }
+
+    fn free(&self, ptr: *mut u8) {
+        let actual_size = self.inner.borrow_mut().free(ptr);
+        self.allocated.set(self.allocated.get() - actual_size);
+    }
+
+    pub(crate) fn poll_drain_cross_shard_freelist(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        unsafe {
+            #[cfg(test)]
+            log::info!("[shard {}] drain free list", self.shard_id);
+            let CrossCpuFreeList {
+                head,
+                waker,
+                drainer,
+            } = &XCPU_FREE_LIST[self.shard_id as usize];
+
+            if head.load(Ordering::Relaxed).is_null() {
+                let mut _waker = waker.borrow_mut();
+                assert!(_waker.is_none());
+                *_waker = Some(cx.waker().clone());
+                drainer.swap(waker.as_ptr(), Ordering::Release);
+            } else {
+                let mut p = head.swap(null_mut(), Ordering::Acquire);
+                while !p.is_null() {
+                    let n = (*p).next;
+                    #[cfg(test)]
+                    log::info!("[shard {}] free item: {:?}", self.shard_id, p);
+                    self.free(p as _);
+                    p = n;
+                }
+                cx.waker().wake_by_ref();
+            }
+
+            Poll::Pending
+        }
     }
 }
 
