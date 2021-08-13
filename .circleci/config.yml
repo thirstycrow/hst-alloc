@@ -69,8 +69,9 @@ jobs:
       image: ubuntu-2004:202104-01
     steps:
       - checkout
-      - rust/install:
-          version: nightly
+      - run:
+          name: Install nightly toolchain
+          command: set -x; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh; chmod +x rustup.sh; ./rustup.sh -y; source "$HOME"/.cargo/env; rustup toolchain install nightly; rustup default nightly
       - run:
           name: Version information
           command: cat /proc/version; rustc --version; cargo --version; rustup --version
@@ -96,8 +97,9 @@ jobs:
       image: ubuntu-2004:202104-01
     steps:
       - checkout
-      - rust/install:
-          version: nightly
+      - run:
+          name: Install nightly toolchain
+          command: set -x; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh; chmod +x rustup.sh; ./rustup.sh -y; source "$HOME"/.cargo/env; rustup toolchain install nightly; rustup default nightly
       - run:
           name: Version information
           command: cat /proc/version; rustc --version; cargo --version; rustup --version
