@@ -73,7 +73,6 @@ rusty_fork_test! {
 
         let nr_shards = 2;
 
-        ALLOCATOR.enable_log();
         ALLOCATOR.initialize(nr_shards);
 
         let mesh = FullMesh::full(nr_shards as _, 1);
@@ -197,7 +196,6 @@ rusty_fork_test! {
 
         let nr_shards = 2;
 
-        ALLOCATOR.enable_log();
         ALLOCATOR.initialize(nr_shards);
 
         let mesh = FullMesh::full(nr_shards as _, 1);

@@ -16,7 +16,7 @@
 extern crate std;
 
 use core::alloc::{Allocator, GlobalAlloc, Layout};
-use core::cell::{Cell, RefCell};
+use core::cell::RefCell;
 use core::future::{poll_fn, Future};
 use core::intrinsics::unlikely;
 use core::ops::{Deref, DerefMut};
@@ -39,8 +39,6 @@ const MAX_SHARDS: usize = 256;
 
 #[thread_local]
 static LOCAL_ALLOCATOR: RefCell<Option<LocalAllocator>> = RefCell::new(None);
-#[thread_local]
-static LOG_ENABLED: Cell<bool> = Cell::new(false);
 
 #[allow(clippy::declare_interior_mutable_const)]
 const EMPTY_XCPU_FREE_LIST: CrossCpuFreeList = CrossCpuFreeList::default();
@@ -174,14 +172,6 @@ impl<G: GlobalAlloc> HstAlloc<G> {
             .deref()
             .as_ref()
             .map(|local| local.allocated_bytes())
-    }
-
-    pub fn enable_log(&self) {
-        LOG_ENABLED.set(true);
-    }
-
-    pub fn disable_log(&self) {
-        LOG_ENABLED.set(false);
     }
 }
 
