@@ -169,7 +169,11 @@ impl<G: GlobalAlloc> HstAlloc<G> {
 
     #[inline]
     pub fn allocated_bytes(&self) -> Option<usize> {
-        LOCAL_ALLOCATOR.borrow().deref().as_ref().map(|local| local.allocated_bytes())
+        LOCAL_ALLOCATOR
+            .borrow()
+            .deref()
+            .as_ref()
+            .map(|local| local.allocated_bytes())
     }
 
     pub fn enable_log(&self) {
