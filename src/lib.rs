@@ -295,7 +295,7 @@ fn free_cross_shard(shard_id: u8, ptr: *mut u8) {
             #[cfg(test)]
             log::info!("wake drainer: {:?}", drainer);
             let waker = (*drainer).take();
-            waker.unwrap().wake_by_ref();
+            waker.unwrap().wake();
         }
     }
 }
