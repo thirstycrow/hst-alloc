@@ -129,4 +129,3 @@ workflows:
       - fmt
       - clippy
       - build
-      - test
