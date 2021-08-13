@@ -98,7 +98,7 @@ impl SmallPool {
     }
 
     pub(crate) fn has_free_object(&self) -> bool {
-        self.free != null_mut()
+        !self.free.is_null()
     }
 
     pub(crate) fn allocate(

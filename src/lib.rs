@@ -42,6 +42,7 @@ static LOCAL_ALLOCATOR: RefCell<Option<LocalAllocator>> = RefCell::new(None);
 #[thread_local]
 static LOG_ENABLED: Cell<bool> = Cell::new(false);
 
+#[allow(clippy::declare_interior_mutable_const)]
 const EMPTY_XCPU_FREE_LIST: CrossCpuFreeList = CrossCpuFreeList::default();
 
 static XCPU_FREE_LIST: [CrossCpuFreeList; MAX_SHARDS] = [EMPTY_XCPU_FREE_LIST; MAX_SHARDS];
@@ -107,7 +108,7 @@ impl<G: GlobalAlloc> HstAlloc<G> {
 
             unsafe {
                 let params = self.global.alloc(Layout::new::<Params>());
-                if params == null_mut() {
+                if params.is_null() {
                     panic!()
                 }
 
@@ -168,10 +169,7 @@ impl<G: GlobalAlloc> HstAlloc<G> {
 
     #[inline]
     pub fn allocated_bytes(&self) -> Option<usize> {
-        match LOCAL_ALLOCATOR.borrow().deref() {
-            Some(local) => Some(local.allocated_bytes()),
-            None => None,
-        }
+        LOCAL_ALLOCATOR.borrow().deref().as_ref().map(|local| local.allocated_bytes())
     }
 
     pub fn enable_log(&self) {

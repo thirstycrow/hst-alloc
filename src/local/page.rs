@@ -15,7 +15,7 @@ pub(crate) struct Page {
 
 impl Page {
     pub(crate) fn has_free_object(&self) -> bool {
-        self.free_list != null_mut()
+        !self.free_list.is_null()
     }
 }
 

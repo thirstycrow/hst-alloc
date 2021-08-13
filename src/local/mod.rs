@@ -155,16 +155,16 @@ impl LocalAllocatorImpl {
     fn create_span_lists() -> [PageList; NR_SPAN_LISTS] {
         let mut span_lists: [MaybeUninit<PageList>; NR_SPAN_LISTS as _] =
             MaybeUninit::uninit_array();
-        for i in 0..span_lists.len() {
-            span_lists[i].write(PageList::default());
+        for span in &mut span_lists {
+            span.write(PageList::default());
         }
         unsafe { transmute(span_lists) }
     }
 
     fn create_small_pools() -> [SmallPool; NR_SMALL_POOLS as _] {
         let mut pools: [MaybeUninit<SmallPool>; NR_SMALL_POOLS as _] = MaybeUninit::uninit_array();
-        for i in 0..pools.len() {
-            pools[i].write(SmallPool::new(idx_to_size(i as _)));
+        for (i, pool) in &mut pools.iter_mut().enumerate() {
+            pool.write(SmallPool::new(idx_to_size(i as _)));
         }
         unsafe { transmute(pools) }
     }
@@ -233,9 +233,10 @@ impl LocalAllocatorImpl {
                 self.nr_free_pages -= *nr_pages;
                 *span_start &= !*nr_pages;
                 *nr_pages *= 2;
-                return true;
+                true
+            } else {
+                false
             }
-            return false;
         }
     }
 
